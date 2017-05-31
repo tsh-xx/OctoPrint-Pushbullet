@@ -32,6 +32,8 @@ class PushbulletPlugin(octoprint.plugin.EventHandlerPlugin,
 		self._bullet = None
 		self._channel = None
 		self._sender = None
+		self._pc_interval = 5
+		self._quiet_time_sec = 1800
 		self._etl_format   = "{days:02d}d {hours:02d} h{minutes:02d}m{seconds:02d}s"
 		self._eta_strftime = "%H:%M:%S %d-%m"
 
@@ -77,7 +79,7 @@ class PushbulletPlugin(octoprint.plugin.EventHandlerPlugin,
 	
 	#~~ PrintProgressPlugin
 	def on_print_progress(self, storage, path, progress):
-		if(progress%5==0):
+		if(progress%self._pc_interval==0):
 			self._logger.info("Progress: {} {} {}".format(storage,path,progress))
 			try:
 				currentData = self._printer.get_current_data()
@@ -88,15 +90,28 @@ class PushbulletPlugin(octoprint.plugin.EventHandlerPlugin,
 			self._logger.info("Messasge: Remaining {} ({})".format(currentData["progress"]["printTimeLeftString"],currentData["progress"]["printTimeLeftOrigin"]))
 			self._logger.info("Messasge: Total Print time {}".format(currentData["progress"]["printTimeString"]))
 			self._logger.info("Messasge: Estimated Completion  {}".format(currentData["progress"]["ETA"]))
+			if progress == self._pc_interval:
+				self._pc_interval = int(currentData["progress"]["printTimeLeft"]/self._quiet_time_sec)
+				self._logger.info("Messasge: Set interval to {} percent".format(self._pc_interval))
+				
 			# Suppress message if print is nearly done
-			if(currentData["progress"]["printTimeLeft"] > 100):
-				import datetime
-
-				elapsed_time = octoprint.util.get_formatted_timedelta(datetime.timedelta(seconds=currentData["progress"]["printTimeLeft"]))
+			no_message = 0
+			if(currentData["progress"]["printTime"] < self._quiet_time_sec * 0.9):
+				self._logger.info("Messasge: Skip starting message since print is ony getting going")
+				no_message = 1
+					 
+			if(currentData["progress"]["printTimeLeft"] < self._quiet_time_sec):
+				self._logger.info("Messasge: Skip trailing message since print is nearly done {} of {}".format(currentData["progress"]["printTimeLeft"], self._quiet_time_sec))
+				no_message = 1
+			   
+			if no_message == 0:
 				file = currentData["job"]["file"]["path"]
+				ETA = currentData["progress"]["ETA"]
+				print_time = currentData["progress"]["printTimeString"]
+				remaining = currentData["progress"]["printTimeLeftString"]
 			
-				title = self._settings.get(["printDone", "title"]).format(**locals())
-				body = self._settings.get(["printDone", "body"]).format(**locals())
+				title = self._settings.get(["printPartial", "title"]).format(**locals())
+				body = self._settings.get(["printPartial", "body"]).format(**locals())
 				filename = os.path.splitext(file)[0] + ".jpg"
 
 				self._send_message_with_webcam_image(title, body, filename=filename)
@@ -138,6 +153,10 @@ class PushbulletPlugin(octoprint.plugin.EventHandlerPlugin,
 			printDone=dict(
 				title="Print job finished",
 				body="{file} finished printing in {elapsed_time}"
+			),
+			printPartial=dict(
+				title="Print job {progress}% complete",
+				body="{file} {progress}% complete in {print_time}, {remaining} to go.\nETA {ETA}"
 			)
 		)
 
