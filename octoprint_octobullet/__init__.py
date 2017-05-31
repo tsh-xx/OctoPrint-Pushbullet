@@ -6,7 +6,9 @@ __license__ = 'GNU Affero General Public License http://www.gnu.org/licenses/agp
 __copyright__ = "Copyright (C) 2015 The OctoPrint Project - Released under terms of the AGPLv3 License"
 
 import os
-
+import time
+import traceback
+import octoprint.util
 import octoprint.plugin
 
 from octoprint.events import Events
@@ -19,6 +21,7 @@ import flask
 import sarge
 
 class PushbulletPlugin(octoprint.plugin.EventHandlerPlugin,
+		       octoprint.plugin.ProgressPlugin,
                        octoprint.plugin.SettingsPlugin,
                        octoprint.plugin.StartupPlugin,
                        octoprint.plugin.TemplatePlugin,
@@ -29,10 +32,77 @@ class PushbulletPlugin(octoprint.plugin.EventHandlerPlugin,
 		self._bullet = None
 		self._channel = None
 		self._sender = None
+		self._etl_format   = "{days:02d}d {hours:02d} h{minutes:02d}m{seconds:02d}s"
+		self._eta_strftime = "%H:%M:%S %d-%m"
 
 	def _connect_bullet(self, apikey, channel_name=""):
 		self._bullet, self._sender = self._create_sender(apikey, channel_name)
 
+	#~~ progress message helpers
+	def _sanitize_current_data(self, currentData):
+		if (currentData["progress"]["printTimeLeft"] == None):
+			currentData["progress"]["printTimeLeft"] = currentData["job"]["estimatedPrintTime"]
+		if (currentData["progress"]["filepos"] == None):
+			currentData["progress"]["filepos"] = 0
+		if (currentData["progress"]["printTime"] == None):
+			currentData["progress"]["printTime"] = currentData["job"]["estimatedPrintTime"]
+
+		currentData["progress"]["printTimeLeftString"] = "No ETL yet"
+		currentData["progress"]["printTimeString"] = "Not started yet"
+		currentData["progress"]["ETA"] = "No ETA yet"
+		#Add additional data
+		try:
+			currentData["progress"]["printTimeLeftString"] = self._get_time_from_seconds(currentData["progress"]["printTimeLeft"])
+			currentData["progress"]["printTimeString"] = self._get_time_from_seconds(currentData["progress"]["printTime"])
+			currentData["progress"]["ETA"] = time.strftime(self._eta_strftime, time.localtime(time.time() + currentData["progress"]["printTimeLeft"]))
+		except Exception as e:
+			self._logger.warning("Caught an exception trying to parse data: {0}\n Error is: {1}\nTraceback:{2}".format(currentData,e,traceback.format_exc()))
+			
+		return currentData
+
+	def _get_time_from_seconds(self, seconds):
+		days =0
+		hours = 0
+		minutes = 0
+		if seconds >= 86400:
+			days = int(seconds / 86400)
+			secionds = seconds % 86400
+		if seconds >= 3600:
+			hours = int(seconds / 3600)
+			seconds = seconds % 3600
+		if seconds >= 60:
+			minutes = int(seconds / 60)
+			seconds = seconds % 60
+		return self._etl_format.format(**locals())
+	
+	#~~ PrintProgressPlugin
+	def on_print_progress(self, storage, path, progress):
+		if(progress%5==0):
+			self._logger.info("Progress: {} {} {}".format(storage,path,progress))
+			try:
+				currentData = self._printer.get_current_data()
+				currentData = self._sanitize_current_data(currentData)
+			except Exception as e:
+				self._logger.info("Caught an exception {0}\nTraceback:{1}".format(e,traceback.format_exc()))
+
+			self._logger.info("Messasge: Remaining {} ({})".format(currentData["progress"]["printTimeLeftString"],currentData["progress"]["printTimeLeftOrigin"]))
+			self._logger.info("Messasge: Total Print time {}".format(currentData["progress"]["printTimeString"]))
+			self._logger.info("Messasge: Estimated Completion  {}".format(currentData["progress"]["ETA"]))
+			# Suppress message if print is nearly done
+			if(currentData["progress"]["printTimeLeft"] > 100):
+				import datetime
+
+				elapsed_time = octoprint.util.get_formatted_timedelta(datetime.timedelta(seconds=currentData["progress"]["printTimeLeft"]))
+				file = currentData["job"]["file"]["path"]
+			
+				title = self._settings.get(["printDone", "title"]).format(**locals())
+				body = self._settings.get(["printDone", "body"]).format(**locals())
+				filename = os.path.splitext(file)[0] + ".jpg"
+
+				self._send_message_with_webcam_image(title, body, filename=filename)
+			
+													    
+	
 	#~~ StartupPlugin
 
 	def on_after_startup(self):
