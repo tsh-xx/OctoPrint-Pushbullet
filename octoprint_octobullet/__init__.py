@@ -97,7 +97,7 @@ class PushbulletPlugin(octoprint.plugin.EventHandlerPlugin,
 			# Suppress message if print is nearly done
 			no_message = 0
 			if(currentData["progress"]["printTime"] < self._quiet_time_sec * 0.9):
-				self._logger.info("Messasge: Skip starting message since print is ony getting going")
+				self._logger.info("Messasge: Skip starting message since print is only been running {}".format(currentData["progress"]["printTime"]))
 				no_message = 1
 					 
 			if(currentData["progress"]["printTimeLeft"] < self._quiet_time_sec):
