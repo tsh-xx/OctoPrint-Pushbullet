@@ -36,7 +36,7 @@ class PushbulletPlugin(octoprint.plugin.EventHandlerPlugin,
 		self._message_count = 0
 		self._quiet_time_sec = 1800
 		self._last_message = 0
-		self._etl_format   = "{days:d}:{hours:02d} h{minutes:02d}m"
+		self._etl_format   = "{days:d}:{hours:02d}h {minutes:02d}m"
 		self._eta_strftime = "%H:%M %d-%m"
 
 	def _connect_bullet(self, apikey, channel_name=""):
@@ -98,10 +98,11 @@ class PushbulletPlugin(octoprint.plugin.EventHandlerPlugin,
 			# first 3 messages, re-calculate interval (not first, analysis estimate can be inacurate)
 			self._message_count += 1
 			if self._message_count < 4 and self._message_count > 1:
-				self._pc_interval = int(currentData["progress"]["printTimeLeft"] / self._quiet_time_sec / self._message_count)
+				total_job = currentData["progress"]["printTime"]+currentData["progress"]["printTimeLeft"]
+				self._pc_interval = int(100 * self._quiet_time_sec / total_job)
 				if self._pc_interval == 0:
 					self._pc_interval = 1
-				self._logger.info("Messasge: Set interval to {} percent count {}".format(self._pc_interval, self._message_count))
+				self._logger.info("Messasge: Set interval to {} percent count {} Total estimated {}".format(self._pc_interval, self._message_count,total_job))
 				
 			# Suppress message if print is nearly done or interval calculation is off
 			no_message = 0
