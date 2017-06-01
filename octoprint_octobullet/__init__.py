@@ -85,6 +85,9 @@ class PushbulletPlugin(octoprint.plugin.EventHandlerPlugin,
 	#~~ PrintProgressPlugin
 	def on_print_progress(self, storage, path, progress):
 		if(progress%self._pc_interval==0):
+			self._quiet_time_sec = int(self._settings.get(["quiet_minutes"])) * 60
+			if self._quiet_time_sec == 0:
+				self._quiet_time_sec = 7* 24 * 3600 # use a week if we don't want messages
 			self._logger.info("Progress: {} {} {}".format(storage,path,progress))
 			try:
 				currentData = self._printer.get_current_data()
@@ -141,7 +144,7 @@ class PushbulletPlugin(octoprint.plugin.EventHandlerPlugin,
 		data = octoprint.plugin.SettingsPlugin.on_settings_load(self)
 
 		# only return our restricted settings to admin users - this is only needed for OctoPrint <= 1.2.16
-		restricted = ("access_token", "push_channel")
+		restricted = ("quiet_minutes", "access_token", "push_channel")
 		for r in restricted:
 			if r in data and (current_user is None or current_user.is_anonymous() or not current_user.is_admin()):
 				data[r] = None
@@ -152,13 +155,15 @@ class PushbulletPlugin(octoprint.plugin.EventHandlerPlugin,
 		octoprint.plugin.SettingsPlugin.on_settings_save(self, data)
 
 		import threading
-		thread = threading.Thread(target=self._connect_bullet, args=(self._settings.get(["access_token"]),
+		thread = threading.Thread(target=self._connect_bullet, args=(self._settings.get(["quiet_minutes"]),
+									     self._settings.get(["access_token"]),
 		                                                             self._settings.get(["push_channel"])))
 		thread.daemon = True
 		thread.start()
 
 	def get_settings_defaults(self):
 		return dict(
+			quiet_minute=0,
 			access_token=None,
 			push_channel=None,
 			printDone=dict(
@@ -173,7 +178,7 @@ class PushbulletPlugin(octoprint.plugin.EventHandlerPlugin,
 
 	def get_settings_restricted_paths(self):
 		# only used in OctoPrint versions > 1.2.16
-		return dict(admin=[["access_token"], ["push_channel"]])
+		return dict(admin=[["quiet_minutes"], ["access_token"], ["push_channel"]])
 
 	#~~ TemplatePlugin API
 
