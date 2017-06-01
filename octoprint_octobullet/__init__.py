@@ -33,9 +33,11 @@ class PushbulletPlugin(octoprint.plugin.EventHandlerPlugin,
 		self._channel = None
 		self._sender = None
 		self._pc_interval = 5
+		self._message_count = 0
 		self._quiet_time_sec = 1800
-		self._etl_format   = "{days:02d}d {hours:02d} h{minutes:02d}m{seconds:02d}s"
-		self._eta_strftime = "%H:%M:%S %d-%m"
+		self._last_message = 0
+		self._etl_format   = "{days:d}:{hours:02d} h{minutes:02d}m"
+		self._eta_strftime = "%H:%M %d-%m"
 
 	def _connect_bullet(self, apikey, channel_name=""):
 		self._bullet, self._sender = self._create_sender(apikey, channel_name)
@@ -44,6 +46,9 @@ class PushbulletPlugin(octoprint.plugin.EventHandlerPlugin,
 	def _sanitize_current_data(self, currentData):
 		if (currentData["progress"]["printTimeLeft"] == None):
 			currentData["progress"]["printTimeLeft"] = currentData["job"]["estimatedPrintTime"]
+		if (currentData["progress"]["printTimeLeft"] == None):
+			self._logger.info("Messasge: Still got no print time {}".format(currentData["progress"]["printTimeLeft"]))
+			currentData["progress"]["printTimeLeft"] = 1000
 		if (currentData["progress"]["filepos"] == None):
 			currentData["progress"]["filepos"] = 0
 		if (currentData["progress"]["printTime"] == None):
@@ -90,14 +95,18 @@ class PushbulletPlugin(octoprint.plugin.EventHandlerPlugin,
 			self._logger.info("Messasge: Remaining {} ({})".format(currentData["progress"]["printTimeLeftString"],currentData["progress"]["printTimeLeftOrigin"]))
 			self._logger.info("Messasge: Total Print time {}".format(currentData["progress"]["printTimeString"]))
 			self._logger.info("Messasge: Estimated Completion  {}".format(currentData["progress"]["ETA"]))
-			if progress == self._pc_interval:
-				self._pc_interval = int(currentData["progress"]["printTimeLeft"]/self._quiet_time_sec)
-				self._logger.info("Messasge: Set interval to {} percent".format(self._pc_interval))
+			# first 3 messages, re-calculate interval (not first, analysis estimate can be inacurate)
+			self._message_count += 1
+			if self._message_count < 4 and self._message_count > 1:
+				self._pc_interval = int(currentData["progress"]["printTimeLeft"] / self._quiet_time_sec / self._message_count)
+				if self._pc_interval == 0:
+					self._pc_interval = 1
+				self._logger.info("Messasge: Set interval to {} percent count {}".format(self._pc_interval, self._message_count))
 				
-			# Suppress message if print is nearly done
+			# Suppress message if print is nearly done or interval calculation is off
 			no_message = 0
-			if(currentData["progress"]["printTime"] < self._quiet_time_sec * 0.9):
-				self._logger.info("Messasge: Skip starting message since print is only been running {}".format(currentData["progress"]["printTime"]))
+			if(currentData["progress"]["printTime"] < (self._quiet_time_sec * 0.5  + self._last_message)):
+				self._logger.info("Messasge: Skip message {} since print is only been running {} since last at {}".format(self._message_count, currentData["progress"]["printTime"], self._last_message))
 				no_message = 1
 					 
 			if(currentData["progress"]["printTimeLeft"] < self._quiet_time_sec):
@@ -105,6 +114,7 @@ class PushbulletPlugin(octoprint.plugin.EventHandlerPlugin,
 				no_message = 1
 			   
 			if no_message == 0:
+				self._last_message = currentData["progress"]["printTime"]
 				file = currentData["job"]["file"]["path"]
 				ETA = currentData["progress"]["ETA"]
 				print_time = currentData["progress"]["printTimeString"]
@@ -156,7 +166,7 @@ class PushbulletPlugin(octoprint.plugin.EventHandlerPlugin,
 			),
 			printPartial=dict(
 				title="Print job {progress}% complete",
-				body="{file} {progress}% complete in {print_time}, {remaining} to go.\nETA {ETA}"
+				body="{progress}% {file}\n{print_time}\n{remaining} left\n{ETA} finish"
 			)
 		)
 
@@ -327,7 +337,6 @@ class PushbulletPlugin(octoprint.plugin.EventHandlerPlugin,
 		
 		if not ffmpeg or not os.access(ffmpeg, os.X_OK) or (not vflip and not hflip and not rotate):
 			return
-
 		ffmpeg_command = [ffmpeg, "-y", "-i", snapshot_path]
 
 		rotate_params = ["format={}".format(pixfmt)] # workaround for foosel/OctoPrint#1317
