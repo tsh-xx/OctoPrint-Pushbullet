@@ -232,6 +232,12 @@ class PushbulletPlugin(octoprint.plugin.EventHandlerPlugin,
 
 			self._send_message_with_webcam_image(title, body, filename=filename)
 
+		if event == Events.PRINT_STARTED:
+			self._pc_interval = 5
+			self.message_count = 0
+			self._last_message = 0
+
+
 	##~~ Softwareupdate hook
 
 	def get_update_information(self):
