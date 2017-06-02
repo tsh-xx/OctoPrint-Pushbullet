@@ -6,6 +6,7 @@ __license__ = 'GNU Affero General Public License http://www.gnu.org/licenses/agp
 __copyright__ = "Copyright (C) 2015 The OctoPrint Project - Released under terms of the AGPLv3 License"
 
 import os
+
 import time
 import traceback
 import octoprint.util
@@ -343,6 +344,7 @@ class PushbulletPlugin(octoprint.plugin.EventHandlerPlugin,
 		
 		if not ffmpeg or not os.access(ffmpeg, os.X_OK) or (not vflip and not hflip and not rotate):
 			return
+
 		ffmpeg_command = [ffmpeg, "-y", "-i", snapshot_path]
 
 		rotate_params = ["format={}".format(pixfmt)] # workaround for foosel/OctoPrint#1317
